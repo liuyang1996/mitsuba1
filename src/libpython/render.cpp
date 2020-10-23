@@ -179,13 +179,26 @@ static bp::list scene_getMedia(Scene *scene) {
 		list.append(cast(media[i].get()));
 	return list;
 }
-
+typedef InternalArray<float>     InternalFloatArray;
 typedef InternalArray<uint32_t>     InternalUInt32Array;
 typedef InternalArray<Point3>       InternalPoint3Array;
 typedef InternalArray<Normal>       InternalNormalArray;
 typedef InternalArray<Point2>       InternalPoint2Array;
 typedef InternalArray<Color3>       InternalColor3Array;
 typedef InternalArray<TangentSpace> InternalTangentSpaceArray;
+
+static InternalFloatArray brdf_brdfList(BSDF *bsdf, int res_wiU, int res_woU, int res_wi, int res_wo, int _seedIndex) {
+	float *data = bsdf->brdfList(res_wiU, res_woU, res_wi, res_wo, _seedIndex);
+
+	int uniformCount = res_wiU * res_wiU * res_wo * res_wo * 7 * 2;
+	return InternalFloatArray(bsdf, data, res_wi * res_wi * res_wo * res_wo * 7 * 2 + uniformCount);
+}
+
+static void brdf_deleteBRDFList(BSDF *bsdf, InternalFloatArray data)
+{
+	bsdf->deleteBRDFList(data.getPointer());
+	
+}
 
 static InternalUInt32Array trimesh_getTriangles(TriMesh *triMesh) {
 	BOOST_STATIC_ASSERT(sizeof(Triangle) == 3*sizeof(uint32_t));
@@ -322,6 +335,7 @@ void export_render() {
 	BP_SETSCOPE(renderModule);
 	renderModule.attr("__path__") = "mitsuba.render";
 
+	BP_INTERNAL_ARRAY(InternalFloatArray);
 	BP_INTERNAL_ARRAY(InternalUInt32Array);
 	BP_INTERNAL_ARRAY(InternalPoint3Array);
 	BP_INTERNAL_ARRAY(InternalPoint2Array);
@@ -723,6 +737,7 @@ void export_render() {
 		.def("reverse", &BSDFSamplingRecord::reverse)
 		.def("__repr__", &BSDFSamplingRecord::toString);
 
+
 	BP_CLASS(BSDF, ConfigurableObject, bp::no_init)
 		.def("getComponentCount", &BSDF::getComponentCount)
 		.def("getType", &bsdf_getType_1)
@@ -734,6 +749,8 @@ void export_render() {
 		.def("getEta", &BSDF::getEta)
 		.def("sample", &bsdf_sample, BP_RETURN_VALUE)
 		.def("eval", &BSDF::eval, BP_RETURN_VALUE)
+		.def("brdfList", brdf_brdfList, BP_RETURN_VALUE)
+		.def("deleteBRDFList", brdf_deleteBRDFList)
 		.def("pdf", &BSDF::pdf)
 		.staticmethod("getMeasure");
 
