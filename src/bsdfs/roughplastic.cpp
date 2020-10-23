@@ -22,7 +22,8 @@
 #include "microfacet.h"
 #include "rtrans.h"
 #include "ior.h"
-
+#include <omp.h>
+#include <mitsuba/core/plugin.h>
 MTS_NAMESPACE_BEGIN
 
 /*!\plugin{roughplastic}{Rough plastic material}
@@ -238,6 +239,247 @@ public:
 		m_nonlinear = stream->readBool();
 
 		configure();
+	}
+
+	bool is_valid(const Vector2& projection) const {
+		return projection.x * projection.x + projection.y * projection.y < 1.0;
+	}
+
+	float* brdfList(int res_wiU, int res_woU, int resWi, int resWo, int _seedIndex) const{
+		
+		int indexSeed = 12345678 + _seedIndex;
+
+		int sampleCount = resWi * resWi * resWo * resWo;
+
+		int uniformSC = res_wiU * res_wiU * res_woU * res_woU;
+
+		const int count = (sampleCount * 7 + uniformSC * 7)*2;
+
+		float *result = new float[count];
+
+#if 1
+		Properties propos("independent");
+		propos.setInteger("seed", indexSeed);
+		ref<Sampler> sampler = static_cast<Sampler *> (PluginManager::getInstance()->
+			createObject(MTS_CLASS(Sampler), propos));
+
+
+		sampler->generate(Point2i(0));
+
+		int tcount = mts_omp_get_max_threads();
+		std::vector<Sampler *> samplers(tcount);
+		for (size_t i = 0; i<tcount; ++i) {
+			ref<Sampler> clonedSampler = sampler->clone();
+			clonedSampler->incRef();
+			samplers[i] = clonedSampler.get();
+		}
+#endif
+
+#pragma omp parallel for
+		for (int i = 0; i < count; i++)
+		{
+			result[i] = 0.0f;
+		}
+
+		SLog(EDebug, "Start BRDF evaluation.");
+
+#if 1
+#pragma omp parallel for	
+		for (int iwi = 0; iwi < res_wiU; iwi++)
+		{
+			for (int jwi = 0; jwi < res_wiU; jwi++)
+			{
+#if defined(MTS_OPENMP)
+				int tid = mts_omp_get_thread_num();
+#else
+				int tid = 0;
+#endif
+
+				Sampler *sampler = samplers[tid];
+				sampler->setSampleIndex(iwi);
+				//generate a wi direction
+				float random1 = sampler->next1D();// randUniform<Float>();
+				float random2 = sampler->next1D();//  randUniform<Float>();
+				Vector wi = Vector3((iwi + random1) / float(res_wiU) * 2 - 1, (jwi + random2) / float(res_wiU) * 2 - 1, 1.0);
+
+				if (wi.x * wi.x + wi.y*wi.y < 1)
+				{
+					int indexWi = iwi * res_wiU + jwi;
+					wi.z = sqrt(1.0 - wi.x * wi.x - wi.y*wi.y);
+					//its.wi = wi;
+					for (int iwo = 0; iwo < res_woU; iwo++)
+					{
+						for (int jwo = 0; jwo < res_woU; jwo++)
+						{
+							float random3 = sampler->next1D();// randUniform<Float>();
+							float random4 = sampler->next1D();//  randUniform<Float>();
+							
+							Vector wo = Vector3((iwo + random3) / float(res_woU) * 2 - 1, (jwo + random4) / float(res_woU) * 2 - 1, 1.0);
+							if (wo.x * wo.x + wo.y*wo.y < 1)
+							{
+								int indexWo = iwo * res_woU + jwo;
+
+								wo.z = sqrt(1.0 - wo.x * wo.x - wo.y*wo.y);
+								Intersection its;
+								BSDFSamplingRecord bRec(its, wi, wo, ERadiance);
+								Spectrum value = eval(bRec, ESolidAngle);
+								int index = (indexWi * res_woU *res_woU + indexWo) * 7;
+								result[index + 0] = (wi.x + 1) * 0.5;// Color3(value[0], value[1], value[2]);
+								result[index + 1] = (wi.y + 1) * 0.5;
+								result[index + 2] = (wo.x + 1) * 0.5;
+								result[index + 3] = (wo.y + 1) * 0.5;// Color3(value[0], value[1], value[2]);
+
+								result[index + 4] = value[0];
+								result[index + 5] = value[1];
+								result[index + 6] = value[2];
+							}
+						}
+					}
+
+				}
+			}
+		}
+#endif
+#if 0
+		int startIndex = uniformSC * 7 * 2;
+
+#pragma omp parallel for	
+		for (int i = 0; i < sampleCount; i++)
+		{
+
+#if defined(MTS_OPENMP)
+			int tid = mts_omp_get_thread_num();
+#else
+			int tid = 0;
+#endif
+			Sampler *sampler = samplers[tid];
+			sampler->setSampleIndex(i);
+
+			float pdf;
+
+			//sample a half vector
+			Intersection its;
+			MicrofacetDistribution distr(
+				m_type,
+				m_alpha->eval(its).average(),
+				m_sampleVisible
+				);
+
+			Normal m = distr.sampleAll(sampler->next2D(), pdf);
+
+			float theta = sampler->next1D()  * M_PI * 2;
+			float z = sampler->next1D();
+
+			Vector wi = Vector3(sqrt(1 - z*z) * cos(theta), sqrt(1 - z*z) * sin(theta), z);
+
+			Vector wo = reflect(wi, m);
+
+			BSDFSamplingRecord bRec(its, wi, wo, ERadiance);
+			Spectrum value = eval(bRec, ESolidAngle);
+			int index = i * 7;
+
+			result[startIndex + index + 0] = (wi.x + 1) * 0.5;// Color3(value[0], value[1], value[2]);
+			result[startIndex + index + 1] = (wi.y + 1) * 0.5;
+			result[startIndex + index + 2] = (wo.x + 1) * 0.5;
+			result[startIndex + index + 3] = (wo.y + 1) * 0.5;// Color3(value[0], value[1], value[2]);
+
+			result[startIndex + index + 4] = value[0];
+			result[startIndex + index + 5] = value[1];
+			result[startIndex + index + 6] = value[2];
+
+		}
+#endif
+
+#if 0
+		//this is for test
+		//output an image
+		int res = 512;
+		Array2D<Rgba> ndfData;
+		ndfData.resizeErase(res, res);
+
+		for (int i = 0; i < res; i++) //width
+		{
+			for (int j = 0; j < res; j++) //width
+			{
+				ndfData[j][i].r = 0;
+				ndfData[j][i].g = 0;
+				ndfData[j][i].b = 0;
+				ndfData[j][i].a = 1.0f;
+			}
+		}
+		Vector wi = Vector3(0, 0, 1);
+
+		//#pragma omp parallel for	
+		for (int i = 0; i < 1000000; i++)
+		{
+
+#if defined(MTS_OPENMP)
+			int tid = mts_omp_get_thread_num();
+#else
+			int tid = 0;
+#endif
+
+			Sampler *sampler = samplers[tid];
+			sampler->setSampleIndex(i);
+			float pdf;
+
+			//sample a half vector
+			float random1 = randUniform<Float>();
+			float random2 = randUniform<Float>();
+			Normal m = distr.sampleAll(Point2(random1, random2), pdf);
+
+			//Normal m = distr.sampleAll(sampler->next2D(), pdf);
+
+			Vector wo = reflect(wi, m);
+
+			Intersection its;
+			BSDFSamplingRecord bRec(its, wi, wo, ERadiance);
+			Spectrum value = eval(bRec, ESolidAngle);
+
+			Vector h = wo;
+			int jh = (h.y + 1) * res * 0.5;//(h.y + 1) * res * 0.5;
+			int ih = (h.x + 1) * res * 0.5;//(h.x + 1) * res * 0.5;
+
+			ndfData[jh][ih].r = value[0];
+			ndfData[jh][ih].g = value[1];
+			ndfData[jh][ih].b = value[2];
+			ndfData[jh][ih].a = 1.0f;
+
+		}
+
+		for (int i = 0; i < res; i++) //width
+		{
+			for (int j = 0; j < res; j++) //width
+			{
+				//	int i = res / 2; int j = res / 2;
+				const Vector2 h = Vector2(2.0f * i / res - 1.0, 2.0f * j / res - 1.0);// 1.0 - 2.0f * j / res);
+				if (!is_valid(h))
+				{
+					ndfData[j][i].r = 0.5f;
+					ndfData[j][i].g = 0.5f;
+					ndfData[j][i].b = 0.5f;
+					ndfData[j][i].a = 1.0f;
+					continue;
+				}
+			}
+		}
+
+		cout << "Start ouput " << endl;
+		std::string outputPath = "testEXR.exr";
+		RgbaOutputFile file(outputPath.c_str(), res, res, WRITE_RGBA); // 1
+		file.setFrameBuffer(&ndfData[0][0], 1, res); // 2
+		file.writePixels(res); // 3
+		cout << "Output Done " << endl;
+
+
+#endif
+		return result;
+	}
+
+	void deleteBRDFList(float* list)const
+	{
+		delete list;
+		list = NULL;
 	}
 
 	void serialize(Stream *stream, InstanceManager *manager) const {
