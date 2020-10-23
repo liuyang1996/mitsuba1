@@ -7,7 +7,21 @@ plugins += env.SharedLibrary('conductor', ['conductor.cpp'])
 plugins += env.SharedLibrary('plastic', ['plastic.cpp'])
 plugins += env.SharedLibrary('roughdiffuse', ['roughdiffuse.cpp'])
 plugins += env.SharedLibrary('roughdielectric', ['roughdielectric.cpp'])
-plugins += env.SharedLibrary('roughconductor', ['roughconductor.cpp'])
+
+filmEnv = env.Clone()
+if filmEnv.has_key('OEXRLIBDIR'):
+	filmEnv.Prepend(LIBPATH=env['OEXRLIBDIR'])
+if filmEnv.has_key('OEXRINCLUDE'):
+	filmEnv.Prepend(CPPPATH=env['OEXRINCLUDE'])
+if filmEnv.has_key('OEXRFLAGS'):
+	filmEnv.Prepend(CPPFLAGS=env['OEXRFLAGS'])
+if filmEnv.has_key('OEXRLIB'):
+	filmEnv.Prepend(LIBS=env['OEXRLIB'])
+
+
+plugins += filmEnv.SharedLibrary('roughconductor', ['roughconductor.cpp'])
+plugins += filmEnv.SharedLibrary('roughconductorApprox', ['roughconductorApprox.cpp'])
+
 plugins += env.SharedLibrary('roughplastic', ['roughplastic.cpp'])
 
 # Materials that act as modifiers
