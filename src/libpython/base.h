@@ -251,6 +251,7 @@ public:
 			SLog(mitsuba::EError, "Index %i is out of range!", i);
 		ptr[i] = value;
 	}
+	Value *getPointer(){ return ptr; }
 private:
 	mitsuba::ref<mitsuba::Object> obj;
 	Value *ptr;
