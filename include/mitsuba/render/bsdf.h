@@ -417,6 +417,16 @@ public:
 	virtual Spectrum eval(const BSDFSamplingRecord &bRec,
 		EMeasure measure = ESolidAngle) const = 0;
 
+	//the resolution for wi and wo precomputation
+	virtual float* brdfList(int res_wiU, int res_woU, int resWi, int resWo, int _seedIndex) const{
+		SLog(EDebug, "Start BRDF evaluation.");
+		return NULL;
+	};
+	virtual void deleteBRDFList(float* list)const{
+		Assert(false);
+	}
+
+
 	/**
 	 * \brief Compute the probability of sampling \c bRec.wo (given
 	 * \c bRec.wi).
